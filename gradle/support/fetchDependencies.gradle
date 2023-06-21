@@ -1,0 +1,370 @@
+/* ###
+ * IP: GHIDRA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*******************************************************************************
+ * fetchDependencies.gradle                                                    *
+ *                                                                             *
+ * Fetches/downloads required dependencies that aren't available in the        *
+ * standard online repositories (eg: maven) and configures a flat              *
+ * directory-style respository that points to them. This should be run         *
+ * immediately after cloning the Ghidra repository before any other gradle     *
+ * tasks are run.                                                              *
+ *                                                                             *
+ * usage: from the command line in the main ghidra repository directory, run   *
+ *        the following:                                                       *
+ *                                                                             *
+ *        gradle -I gradle/support/fetchDependencies.gradle init               *
+ *                                                                             *
+ * Note: When running the script, files will only be downloaded if             *
+ *       necessary (eg: they are not already in the dependencies/downloads/    *
+ *       directory).                                                           *
+ *                                                                             *
+ *******************************************************************************/
+
+import java.util.zip.*;
+import java.nio.file.*;
+import java.security.MessageDigest;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.filefilter.WildcardFileFilter;
+
+initscript {
+	repositories { mavenCentral() }
+	dependencies { classpath 'commons-io:commons-io:2.11.0' }
+}
+
+ext.NUM_RETRIES = 3 // # of times to try to download a file before failing
+ext.REPO_DIR = ((Script)this).buildscript.getSourceFile().getParentFile().getParentFile().getParentFile()
+ext.DEPS_DIR = file("${REPO_DIR}/dependencies")
+ext.DOWNLOADS_DIR = file("${DEPS_DIR}/downloads")
+ext.FID_DIR = file("${DEPS_DIR}/fidb")
+ext.FLAT_REPO_DIR = file("${DEPS_DIR}/flatRepo")
+ext.OFFLINE = System.properties["offline"] != null
+ext.createdDirs = [] as Set
+
+file("${REPO_DIR}/Ghidra/application.properties").withReader { reader ->
+	def ghidraProps = new Properties()
+	ghidraProps.load(reader)
+	ext.RELEASE_VERSION = ghidraProps.getProperty('application.version')
+}
+
+ext.deps = [
+	[
+		name: "dex2jar-2.1.zip",
+		url: "https://github.com/pxb1988/dex2jar/releases/download/v2.1/dex2jar-2.1.zip",
+		sha256: "7a9bdf843d43de4d1e94ec2e7b6f55825017b0c4a7ee39ff82660e2493a46f08",
+		destination: {
+			unzip(DOWNLOADS_DIR, DOWNLOADS_DIR, "dex2jar-2.1.zip")
+			copyDirectory(new File(DOWNLOADS_DIR, "dex-tools-2.1/lib/"), FLAT_REPO_DIR, new WildcardFileFilter("dex-*"));
+		}
+	],
+	[
+		name: "AXMLPrinter2.jar",
+		url: "https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/android4me/AXMLPrinter2.jar",
+		sha256: "00ed038eb6abaf6ddec8d202a3ed7a81b521458f4cd459948115cfd02ff59d6d",
+		destination: FLAT_REPO_DIR
+	],
+	[
+		name: "yajsw-stable-13.09.zip",
+		url: "https://sourceforge.net/projects/yajsw/files/yajsw/yajsw-stable-13.09/yajsw-stable-13.09.zip",
+		sha256: "4dae732a535846ae5dfab753e82a4d5f93ad9a05a065e2172bb9774a1b15453a",
+		destination: file("${DEPS_DIR}/GhidraServer")
+	],
+	[
+		name: "PyDev 6.3.1.zip",
+		url: "https://sourceforge.net/projects/pydev/files/pydev/PyDev%206.3.1/PyDev%206.3.1.zip",
+		sha256: "4d81fe9d8afe7665b8ea20844d3f5107f446742927c59973eade4f29809b0699",
+		destination: file("${DEPS_DIR}/GhidraDev")
+	],
+	[
+		name: "cdt-8.6.0.zip",
+		url: "https://archive.eclipse.org/tools/cdt/releases/8.6/cdt-8.6.0.zip",
+		sha256: "81b7d19d57c4a3009f4761699a72e8d642b5e1d9251d2bb98df438b1e28f8ba9",
+		destination: file("${DEPS_DIR}/GhidraDev")
+	],
+	[
+		name: "vs2012_x64.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2012_x64.fidb",
+		sha256: "d4e98ab3f790b831793218430bba0d8b24a5fbf4da65b0c1ffa8cb0cfbeb0cdc",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2012_x86.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2012_x86.fidb",
+		sha256: "a490ed7e2ed21e587459feaeace7036b7ede4ce84e72e10dfd8c57434a6918b6",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2015_x64.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2015_x64.fidb",
+		sha256: "e04e9e40f9ecb601c85f4d84ed9bf66b45363be1d1e82c162e4c9902b8cb508f",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2015_x86.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2015_x86.fidb",
+		sha256: "b66ee696653e2ed365919deaaef885103120c792e22e79af70d1209d7e1d8644",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2017_x64.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2017_x64.fidb",
+		sha256: "d5fa5f697298174fa53d247d3599e6a12884605ad181c7b954e2380ec1f0bd89",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2017_x86.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2017_x86.fidb",
+		sha256: "d389cb8d76ff4a59ca35f891b8521c72ad5f0df96e253973a2d21a8614a4cc81",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2019_x64.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2019_x64.fidb",
+		sha256: "150007796fc36a4069660ad62449aadaaf3dd11b3864a5ef21e79831c9ce9118",
+		destination: FID_DIR
+	],
+	[
+		name: "vs2019_x86.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vs2019_x86.fidb",
+		sha256: "eb630a36faa586a371eb734dc0bbd8d13ccaef697f3db5872596358f3dd2432a",
+		destination: FID_DIR
+	],
+	[
+		name: "vsOlder_x64.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vsOlder_x64.fidb",
+		sha256: "8c3b51f4660cd27e1a0d610a9f3f2d5fbc833a66ac9ee4393ee2f2481e855866",
+		destination: FID_DIR
+	],
+	[
+		name: "vsOlder_x86.fidb",
+		url: "https://github.com/NationalSecurityAgency/ghidra-data/raw/Ghidra_${RELEASE_VERSION}/FunctionID/vsOlder_x86.fidb",
+		sha256: "98605c6b6b9214a945d844e41c85860d54649a45bca7873ef6991c0e93720787",
+		destination: FID_DIR
+	]
+]
+
+// Download dependencies (if necessary) and verify their hashes
+mkdirs(DOWNLOADS_DIR)
+deps.each {
+	File file = new File(DOWNLOADS_DIR, it.name)
+	if (OFFLINE || !it.sha256.equals(generateHash(file))) {
+		download(it.url, file)
+		if (!OFFLINE) {
+			assert(it.sha256.equals(generateHash(file)));
+		}
+	}
+}
+
+// Copies the downloaded dependencies to their required destination. 
+// Some downloads require pre-processing before their relevant pieces can be copied.
+deps.each {
+	if (it.destination instanceof File) {
+		if (!OFFLINE) {
+			println "Copying " + it.name + " to " + it.destination
+		}
+		mkdirs(it.destination)
+		copyFile(new File(DOWNLOADS_DIR, it.name), new File(it.destination, it.name));
+	}
+	else if (it.destination instanceof Closure) {
+		if (!OFFLINE) {
+			println "Processing " + it.name 
+		}
+		it.destination()
+	}
+	else {
+		throw new GradleException("Unexpected destination type: " + it.destination)
+	}
+}
+//-------------------------------------Helper methods----------------------------------------------
+
+/**
+ * Downloads a file from a URL. The download attempt will be tried NUM_RETRIES times before failing.
+ *
+ * Progress is shown on the command line in the form of the number of bytes downloaded and a 
+ * percentage of the total. 
+ *
+ * Note: We do not validate that the number of bytes downloaded matches the expected total here; any
+ * discrepencies will be caught when checking the SHA-256s later on.
+ *
+ * @param url the file to download
+ * @param file the local file to create for the download
+ */
+def download(url, file) {
+	if (OFFLINE) {
+		println "curl -L -o " + relative(file) +  " '" + url + "'"
+		return
+	}
+	
+	println "URL: " + url
+	def(InputStream istream, size) = establishConnection(url, NUM_RETRIES);
+	assert istream != null : "   ***CONNECTION FAILURE***\n   max attempts exceeded; exiting\n"
+
+	FileOutputStream ostream = new FileOutputStream(file);
+	def dataBuffer = new byte[1024];
+	int bytesRead;
+	int totalRead;
+	while ((bytesRead = istream.read(dataBuffer, 0, 1024)) != -1) { 
+		ostream.write(dataBuffer, 0, bytesRead);
+		totalRead += bytesRead
+		print "\r"
+		print "   Downloading: " + totalRead + " of " + size
+		if (!size.equals("???")) {
+			int pctComplete = (totalRead / size) * 100
+			print " (" + pctComplete + "%)"
+		}
+		print "                                               " // overwrite gradle timer output
+		System.out.flush()
+	}
+	println()
+	istream.close();
+	ostream.close();
+}
+
+/**
+ * Attempts to establish a connection to the given URL 
+ *
+ * @param url the URL to connect to
+ * @param retries the number of times to attempt to connect if there are failures
+ * @return the InputStream for the URL, and the size of the download in bytes as a string
+ */
+def establishConnection(url, retries) {
+	for (int i = 0; i < retries; i++) {
+		try {
+			if (i == 0) {
+				println "   Connecting..." 
+			}
+			else {
+				println "   Connecting (" + (i+1) + "/" + retries + ")..."
+			}
+			URLConnection conn = new URL(url).openConnection();
+			conn.setRequestMethod("HEAD");
+			def size = conn.getContentLengthLong();
+			if (size == -1) {
+				size = "???" 
+			}
+			return [new BufferedInputStream(new URL(url).openStream()), size]; 
+		}
+		catch (Exception e) {
+			println "   Connection error! " + e
+		}
+	}
+}
+
+/**
+ * Unzips a file to a directory
+ *
+ * @param sourceDir the directory where the zip file resides
+ * @param targetDir the directory where the unzipped files should be placed
+ * @param zipFileName the name of the file to unpack
+ */
+def unzip(sourceDir, targetDir, zipFileName) {
+	def zipFile = new File(sourceDir, zipFileName)
+	if (OFFLINE) {
+		println "unzip " + relative(zipFile) + " -d " + relative(targetDir)
+		return
+	}
+	
+	def zip = new ZipFile(zipFile)
+	zip.entries().findAll { !it.directory }.each { e ->
+		(e.name as File).with { f -> 
+			if (f.parentFile != null) {
+				File destPath = new File(targetDir.path, f.parentFile.path)
+				mkdirs(destPath)
+				File targetFile = new File(destPath.path, f.name)
+				targetFile.withOutputStream { w -> 
+					w << zip.getInputStream(e)
+				}
+			}
+		}
+	}
+	zip.close()
+}
+
+/**
+ * Creates the given directory, including any necessary but nonexistent parent directories
+ *
+ * @return true if and only if the directory was created, along with all necessary parent 
+ *   directories; false otherwise
+ */
+def mkdirs(dir) {
+	if (OFFLINE) {
+		if (!createdDirs.contains(dir)) {
+			println "mkdir -p " + relative(dir)
+			createdDirs << dir
+		}
+		return
+	}
+	return dir.mkdirs()
+ }
+
+/**
+ * Copies a file to a new location
+ *
+ * @param sourceFile the file to copy
+ * @param targetFile the new file
+ */
+def copyFile(sourceFile, targetFile) {
+	if (OFFLINE) {
+		println "cp " + relative(sourceFile) + " " + relative(targetFile)
+		return
+	}
+	
+	FileUtils.copyFile(sourceFile, targetFile)
+}
+
+/**
+ * Copies a filtered directory to a new location
+ *
+ * @param sourceDir the directory to copy
+ * @param targetDir the new directory
+ * @param filter the filter to apply; null to copy everything
+ */
+def copyDirectory(sourceDir, targetDir, filter) {
+	if (OFFLINE) {
+		println "cp -r " + relative(sourceDir) + " " + relative(targetDir)
+		return
+	}
+	
+	FileUtils.copyDirectory(sourceDir, targetDir, filter)
+}
+
+/**
+ * Returns the path of the file relative to the repository
+ *
+ * @return The path of the file relative to the repository
+ */
+def relative(file) {
+	return "\"" + file.absolutePath.substring(REPO_DIR.absolutePath.length() + 1).replaceAll("\\\\", "/") + "\""
+}
+
+/**
+ * Generates the SHA-256 hash for the given file
+ *
+ * @param file the file to generate the SHA-256 hash for
+ * @return the generated SHA-256 hash, or null if the file does not exist
+ */
+def generateHash(file) {
+	if (!file.exists()) {
+		return null
+	}
+	MessageDigest md = MessageDigest.getInstance("SHA-256");
+	md.update(Files.readAllBytes(Paths.get(file.path)));
+	byte[] digest = md.digest();
+	StringBuilder sb = new StringBuilder();
+	for (byte b : digest) {
+		sb.append(String.format("%02x", b));
+	}
+	return sb.toString();
+}
