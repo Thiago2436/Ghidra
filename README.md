@@ -2,7 +2,7 @@
 
 # Ghidra Software Reverse Engineering Framework
 
-Ghidra is a software reverse engineering (SRE) framework created and maintained by the 
+> Ghidra is a software reverse engineering (SRE) framework created and maintained by the 
 [National Security Agency][nsa] Research Directorate. This framework includes a suite of 
 full-featured, high-end software analysis tools that enable users to analyze compiled code on a 
 variety of platforms including Windows, macOS, and Linux. Capabilities include disassembly, 
