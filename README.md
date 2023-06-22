@@ -23,7 +23,7 @@ cybersecurity tools for NSA to help protect our nation and its allies, consider 
 
 ## Security Warning
 
-**WARNING:** There are known security vulnerabilities within certain versions of Ghidra.  Before 
+> **WARNING:** There are known security vulnerabilities within certain versions of Ghidra.  Before 
 proceeding, please read through Ghidra's [Security Advisories][security] for a better understanding 
 of how you might be impacted.
 
